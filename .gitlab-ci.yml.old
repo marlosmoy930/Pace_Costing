@@ -1,0 +1,1020 @@
+services:
+  - docker:dind
+
+variables:
+  MAJOR_VERSION: 2
+  MINOR_VERSION: 2
+  SPRINT_ID: 0
+  ROOT_SOLUTION_FILE: "CscGet.sln"
+  SOLUTION_BUILD_OUT_DIR: "Build\\Solution"
+  COSTING_HOST_PROJECT_NAME: "Dxc.Captn.Costing.Host"
+  COSTING_HOST_PROJECT: "Dxc.Captn.Costing.Host\\Dxc.Captn.Costing.Host.csproj"
+  COSTING_HOST_PROJECT_OUT_DIR: "Build/Costing"
+  COSTING_PROJECT_NAME: Dxc.Captn.Costing
+  CALCULATION_SERVICE_PROJECT: "Dxc.Captn.CalculationService.Host\\Dxc.Captn.CalculationService.Host.csproj"
+  CALCULATION_BUILD_OUT_DIR: "Build/CalcService"
+  CALCULATION_PROJECT_NAME: Dxc.Captn.CalculationService.Host
+  DB_PROJECT: "CscGet.Database\\CscGet.Database.sqlproj"
+  DB_PROJECT_NAME: Dxc.Captn.Database
+  DB_PROJECT_OUT_DIR: "Build\\SqlDeploy"
+  DB_MIGRATIONS_PROJECT: "CscGet.Database.Migrations\\CscGet.Database.Migrations.csproj"
+  DB_MIGRATIONS_PROJECT_OUT_DIR: "Build/SqlMigrations"
+  DB_MIGRATIONS_PROJECT_NAME: Dxc.Captn.SqlMigrations
+  DB_BACKUP_FILE: CscGet_Production.bak
+  ENV_CONSUL_HOST: http://env253.evaluate-it.cloud:8500
+  ART_NUGET_URL: https://artifactory.evaluate-it.cloud/artifactory/api/nuget
+  IAC_BRANCH: dev
+  DEPLOY_SCRIPT_URL: 'http://vm199251.projects.local/DXC/Tools/Dxc.Captn.CD/raw/dev/CI/deployment.ps1'
+  DEV_ARTIFACTORY_REPOSITORY: CscBE
+  STAGING_ARTIFACTORY_REPOSITORY: CscBE-staging
+  BUSINESS_LOG_PROJECT_ID: 120
+  BRANCH_NAME: $CI_BUILD_REF_NAME
+  MIGRATION_DB_SET_PARAM: "--set base-configuration.runMigrations=true"
+  DEPLOY_DB_SET_PARAM: "--set base-configuration.republishDatabase=true"
+  DOCKER_FOLDER: docker/$COMPONENT_NAME
+
+stages:
+  - build
+  - testing_solution_checks
+  - package
+  - restore_db_integration
+  - deploy_integration
+  - integration_tests
+  - performance_tests
+  - deploy
+  - integration_tests_env77
+  - performance_tests_env77
+  - analitics
+
+before_script:
+  - >
+    switch ($CI_BUILD_REF_NAME) {
+    "dev" { $ARTIFACTORY = "$ART_NUGET_URL/$DEV_ARTIFACTORY_REPOSITORY" }
+    "staging" { $ARTIFACTORY = "$ART_NUGET_URL/$STAGING_ARTIFACTORY_REPOSITORY" }
+    default { $ARTIFACTORY = "$ART_NUGET_URL/Feature1Env" }
+    }
+  - $env:PACKAGE_VERSION="$MAJOR_VERSION.$SPRINT_ID.$MINOR_VERSION.$CI_PIPELINE_ID"
+  - $env:ARTIFACTORY = $ARTIFACTORY
+  - $(Get-ChildItem Env:)
+  - git prune
+
+build_costing:
+  stage: build
+  before_script:
+  - uname -a
+  script:
+    - dotnet publish $COSTING_HOST_PROJECT -c Release -o "$CI_PROJECT_DIR/$COSTING_HOST_PROJECT_OUT_DIR" --runtime $DEFAULTBUILDRUNTIME
+  artifacts:
+    expire_in: 3h
+    paths:
+      - $COSTING_HOST_PROJECT_OUT_DIR
+  except:
+    - triggers
+  tags:
+    - dotnetsdk-alpine
+
+build_calculation:
+  stage: build
+  before_script:
+  - uname -a
+  script:
+    - dotnet publish $CALCULATION_SERVICE_PROJECT -c Relase -o $CI_PROJECT_DIR/$CALCULATION_BUILD_OUT_DIR --runtime $DEFAULTBUILDRUNTIME
+  artifacts:
+    expire_in: 3h
+    paths:
+      - $CALCULATION_BUILD_OUT_DIR
+  except:
+    - triggers
+  tags:
+    - dotnetsdk-alpine
+
+build_database:
+  stage: build
+  script:
+    - CI\buildProject.ps1 -Project $DB_PROJECT -OutDir $CI_PROJECT_DIR\$DB_PROJECT_OUT_DIR
+  artifacts:
+    expire_in: 3h
+    paths:
+      - $DB_PROJECT_OUT_DIR
+  except:
+    - triggers
+
+build_migrations:
+  stage: build
+  before_script:
+  - uname -a
+  script:
+    - dotnet publish $DB_MIGRATIONS_PROJECT -c Release -o $CI_PROJECT_DIR/$DB_MIGRATIONS_PROJECT_OUT_DIR --runtime $DEFAULTBUILDRUNTIME
+  artifacts:
+    expire_in: 3h
+    paths:
+      - $DB_MIGRATIONS_PROJECT_OUT_DIR
+  except:
+    - triggers
+  tags:
+    - dotnetsdk-alpine
+
+unit_tests:
+  stage: testing_solution_checks
+  before_script:
+  - uname -a
+  script:
+    - bash CI/tests.sh
+  artifacts:
+    expire_in: 3h
+    paths:
+      - TestResults
+  except:
+    - triggers
+  tags:
+    - dotnetsdk-alpine
+
+code_coverage:
+  stage: testing_solution_checks
+  script:
+    - CI\testCoverage.ps1
+  artifacts:
+    expire_in: 3h
+    paths:
+      - coverage\
+  except:
+    - triggers
+  when: manual
+
+checkProjectReferences_tests:
+  stage: testing_solution_checks
+  script:
+    - CI\checkProjectReferences.ps1
+  except:
+    - triggers
+
+checkNugetReferences_tests:
+  stage: testing_solution_checks
+  script:
+    - CI\checkNugetReferences.ps1
+  except:
+    - triggers
+
+checkConsolidateDlls_tests:
+  stage: testing_solution_checks
+  script:
+    - CI\checkConsolidateDlls.ps1
+  except:
+    - triggers
+
+checkNugetPackageVersions_tests:
+  stage: testing_solution_checks
+  script:
+    - CI\checkNugetPackageVersions.ps1
+  except:
+    - triggers
+
+make_production_backups:
+  stage: package
+  script:
+    - CI\databasesBackup.ps1 -ShareUrl $SHARE_URL -ShareUsername $SHARE_USERNAME -SharePassword $SHARE_PASS -ConsulDc $STG_CONSUL_DC
+  only:
+    - dev
+    - staging
+    - production-r2
+    - production-r21
+    - stg-tag
+  except:
+    - triggers
+  when: manual
+
+.integration_tests_env77:
+  stage: integration_tests_env77
+  script:
+    - CI\runIntegrationTests.ps1 -IntegrationTestToken "$INTEGRATION_TESTS_TOKEN" -IntegrationTestsUri "$INTEGRATION_TESTS_URI" -PrivateToken "$INTEGRATION_TESTS_PRIVATE_TOKEN" -Timeout "$INTEGRATION_TESTS_TIMEOUT" -Branch "$CI_BUILD_REF_NAME"
+  tags:
+    - integrationtests
+  dependencies:
+  - build_costing
+  - build_calculation
+  variables:
+    INTEGRATION_TESTS_URI: "https://evn77.evaluate-it.cloud"
+  only:
+    - staging
+
+.integration_tests_env249:
+  stage: integration_tests
+  script:
+    - CI\runIntegrationTests.ps1 -IntegrationTestToken "$INTEGRATION_TESTS_TOKEN" -IntegrationTestsUri "$INTEGRATION_TESTS_URI" -PrivateToken "$INTEGRATION_TESTS_PRIVATE_TOKEN" -Timeout "$INTEGRATION_TESTS_TIMEOUT" -Branch "dev"
+  tags:
+    - integrationtests
+  dependencies:
+  - build_costing
+  - build_calculation
+  only:
+    - dev
+
+.performance_tests_script_template: &performance_tests_script
+  script:
+    - Sleep 30
+    - $message="Download  report$CI_PIPELINE_ID.zip artifact, unpack, open by Jmeter localy and check results!"
+    - git clone -b $CI_BUILD_REF_NAME http://gitlab-ci-token:$CI_JOB_TOKEN@vm199251.projects.local/DXC-Tools/Captn-performance-testing.git
+    - cd Captn-performance-testing
+    - $URL=new-object system.uri($CI_ENVIRONMENT_URL)
+    - CI\runPerformanceTest.ps1  -ReportFile report.jtl -TestPlan test_script.jmx -EndPointHost $URL.host
+    - if ($env:LASTEXITCODE -gt 0) {7z a ..\report$CI_PIPELINE_ID.zip report.jtl jmeter.log test_script.jmx; Write-Host "$message"; exit $env:LASTEXITCODE}
+  dependencies: []
+
+performance_tests_env249:
+  stage: performance_tests
+  <<: *performance_tests_script
+  tags:
+    - performance
+  environment:
+    name: Env249
+    url: https://env249.captn.evaluate-it.cloud
+  only:
+    - dev
+  except:
+    - triggers
+  artifacts:
+    when: on_failure
+    expire_in: 1h
+    paths:
+    - report$CI_PIPELINE_ID.zip
+
+performance_tests_env77:
+  stage: performance_tests_env77
+  <<: *performance_tests_script
+  tags:
+    - performance
+  environment:
+    name: Env77
+    url: https://env77.evaluate-it.cloud
+  only:
+    - staging
+  except:
+    - triggers
+  artifacts:
+    when: on_failure
+    expire_in: 1h
+    paths:
+    - report$CI_PIPELINE_ID.zip
+
+.artifactory_publish: &artifactory_publish
+  stage: package
+  script:
+    - CI\nuget.ps1 -Version $env:PACKAGE_VERSION -ApiKey $ART_API_KEY
+  except:
+    - triggers
+  dependencies:
+    - build_migrations
+    - build_database
+
+.pre_deploy: &pre_deploy
+  before_script:
+    - PACKAGE_VERSION="$MAJOR_VERSION.$SPRINT_ID.$MINOR_VERSION.$CI_PIPELINE_ID"
+    - echo $PACKAGE_VERSION
+  script:
+    - kubectl replace --force -f CI/redis-job.yaml --namespace $DEPLOYMENT_ENVIRONMENT
+    - bash CI/removeq.sh --ConsulHost https://consul.$DEPLOYMENT_ENVIRONMENT.captn.evaluate-it.cloud --ConsulDC $ENV_CONSUL_DC --QueuesPrefix $DEPLOYMENT_ENVIRONMENT
+    - bash CI/slack.sh --Text "$CI_ENVIRONMENT_NAME ($CI_ENVIRONMENT_URL) is updated BE $PACKAGE_VERSION" --SlackUri $SLACK_URI
+  dependencies: []
+  tags:
+    - linux
+
+.cleanup_db: &cleanup_db
+  before_script:
+    - >
+      case $CI_BUILD_REF_NAME in
+        dev) ARTIFACTORY="$ART_NUGET_URL/$DEV_ARTIFACTORY_REPOSITORY";;
+        staging) ARTIFACTORY="$ART_NUGET_URL/$STAGING_ARTIFACTORY_REPOSITORY";;
+        *) ARTIFACTORY="$ART_NUGET_URL/Feature1Env";;
+      esac
+    - PACKAGE_VERSION="$MAJOR_VERSION.$SPRINT_ID.$MINOR_VERSION.$CI_PIPELINE_ID"
+    - SERVICES=("inflation" "labor" "bid-management" "labor-rates" "price-performance" "contingency" "hardware" "security" "quantity")
+    - echo $PACKAGE_VERSION
+  script:
+    - bash CI/deployDb.sh --ConsulHost https://consul.$DEPLOYMENT_ENVIRONMENT.captn.evaluate-it.cloud --ConsulDC $ENV_CONSUL_DC --BackEndVersion $PACKAGE_VERSION --DbRepo $ARTIFACTORY
+    - helm init --client-only
+    - helm repo add dxc.captn $CHART_REPOSITORY
+    - echo helm upgrade --install --force --recreate-pods $MIGRATION_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/costing --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-costing dxc.captn/costing --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - helm upgrade --install --force --recreate-pods $MIGRATION_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/costing --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-costing dxc.captn/costing --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - for SERVICENAME in "${SERVICES[@]}"; do helm upgrade --install --force --recreate-pods $DEPLOY_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/$SERVICENAME --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-$SERVICENAME dxc.captn/$SERVICENAME --namespace=$DEPLOYMENT_ENVIRONMENT --wait; done
+    - bash CI/runPipelineJob.sh --ProjectId $BUSINESS_LOG_PROJECT_ID --Branch $BRANCH_NAME --Job "drop_mongoDb_$DEPLOYMENT_ENVIRONMENT"
+    - kubectl replace --force -f CI/redis-job.yaml --namespace $ENV_CONSUL_DC
+    - helm upgrade --install --force --recreate-pods --set base-configuration.serviceImage.imageName=docker/gateway --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest $DEPLOYMENT_ENVIRONMENT-gateway dxc.captn/gateway --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - bash CI/removeq.sh --ConsulHost https://consul.$DEPLOYMENT_ENVIRONMENT.captn.evaluate-it.cloud --ConsulDC $ENV_CONSUL_DC --QueuesPrefix $DEPLOYMENT_ENVIRONMENT
+    - bash CI/slack.sh --Text "$CI_ENVIRONMENT_NAME DB was cleaned-up and migrated $PACKAGE_VERSION!" --SlackUri $SLACK_URI
+  dependencies: []
+  tags:
+    - linux
+
+.restore_db: &restore_db
+  before_script:
+    - >
+      case $CI_BUILD_REF_NAME in
+        dev) ARTIFACTORY="$ART_NUGET_URL/$DEV_ARTIFACTORY_REPOSITORY";;
+        staging) ARTIFACTORY="$ART_NUGET_URL/$STAGING_ARTIFACTORY_REPOSITORY";;
+        *) ARTIFACTORY="$ART_NUGET_URL/Feature1Env";;
+      esac
+    - PACKAGE_VERSION="$MAJOR_VERSION.$SPRINT_ID.$MINOR_VERSION.$CI_PIPELINE_ID"
+    - SERVICES=("inflation" "labor" "bid-management" "labor-rates" "price-performance" "contingency" "hardware" "security" "quantity")
+    - echo $PACKAGE_VERSION
+  script:
+    - bash CI/databaseRestore.sh --ConsulHost https://consul.$DEPLOYMENT_ENVIRONMENT.captn.evaluate-it.cloud --BackupFile $DB_BACKUP_FILE --ShareUrl $SHARE_URL --ShareUsername $SHARE_USERNAME --SharePassword $SHARE_PASS --ConsulDC $ENV_CONSUL_DC
+    - helm init --client-only
+    - helm repo add dxc.captn $CHART_REPOSITORY
+    - echo helm upgrade --install --force --recreate-pods $MIGRATION_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/costing --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-costing dxc.captn/costing --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - helm upgrade --install --force --recreate-pods $MIGRATION_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/costing --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-costing dxc.captn/costing --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - for SERVICENAME in "${SERVICES[@]}"; do helm upgrade --install --force --recreate-pods $DEPLOY_DB_SET_PARAM --set base-configuration.serviceImage.imageName=docker/$SERVICENAME --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest --set base-configuration.runMigrations=true $DEPLOYMENT_ENVIRONMENT-$SERVICENAME dxc.captn/$SERVICENAME --namespace=$DEPLOYMENT_ENVIRONMENT --wait; done
+    - bash CI/runPipelineJob.sh --ProjectId $BUSINESS_LOG_PROJECT_ID --Branch $BRANCH_NAME --Job "drop_mongoDb_$DEPLOYMENT_ENVIRONMENT"
+    - kubectl replace --force -f CI/redis-job.yaml --namespace $ENV_CONSUL_DC
+    - helm upgrade --install --force --recreate-pods --set base-configuration.serviceImage.imageName=docker/gateway --set base-configuration.serviceImage.env=$BRANCH_NAME --set base-configuration.serviceImage.sprint=latest $DEPLOYMENT_ENVIRONMENT-gateway dxc.captn/gateway --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+    - bash CI/removeq.sh --ConsulHost https://consul.$DEPLOYMENT_ENVIRONMENT.captn.evaluate-it.cloud --ConsulDC $ENV_CONSUL_DC --QueuesPrefix $DEPLOYMENT_ENVIRONMENT
+    - bash CI/slack.sh --Text "$CI_ENVIRONMENT_NAME ($CI_ENVIRONMENT_URL) is restored $PACKAGE_VERSION" --SlackUri $SLACK_URI
+  dependencies: []
+  tags:
+    - linux
+
+.docker: &docker
+  before_script:
+  - VERSION_BRANCH_INFO="$MAJOR_VERSION.$SPRINT_ID.$MINOR_VERSION.$CI_PIPELINE_ID $CI_COMMIT_REF_NAME $CI_COMMIT_SHA"
+  - DOCKER_FOLDER="docker/$COMPONENT_NAME"
+  - DOCKER_IMAGE_PATH="$DOCKER_REGISTRY/$DOCKER_FOLDER"
+  - echo "$VERSION_BRANCH_INFO"
+  script:
+    - echo $BRANCH
+    - docker login -u $DOCKER_USER -p $DOCKER_PASS $DOCKER_REGISTRY
+    - docker pull $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA ||
+        docker build --rm -t $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA . --build-arg InformationalVersion="$VERSION_BRANCH_INFO" --build-arg COSTING_FOLDER_NAME="$COSTING_HOST_PROJECT_OUT_DIR" --build-arg CALCULATION_FOLDER_NAME="$CALCULATION_BUILD_OUT_DIR" --build-arg DB_MIGRATIONS_FOLDER_NAME="$DB_MIGRATIONS_PROJECT_OUT_DIR" -f ./$COMPONENT_DOCKER_FILE
+    - docker tag $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA $DOCKER_IMAGE_PATH:$BRANCH
+    - docker tag $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA $DOCKER_IMAGE_PATH:$BRANCH.$CI_COMMIT_SHA
+    - docker tag $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA $DOCKER_IMAGE_PATH:$BRANCH.latest
+    - docker tag $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA $DOCKER_IMAGE_PATH:$BRANCH.$SPRINT_ID
+    - docker tag $DOCKER_IMAGE_PATH:$CI_COMMIT_SHA $DOCKER_IMAGE_PATH:$BRANCH.$DEPLOYMENT_ENVIRONMENT
+    - docker push $DOCKER_IMAGE_PATH
+  tags:
+    - kube-docker
+
+.deploy: &deploy
+  variables:
+    DEPLOY_PARAMS: ""
+  before_script:
+  - ls .
+  script:
+    - helm init --client-only
+    - helm repo add dxc.captn $CHART_REPOSITORY
+    - helm upgrade --install --force --recreate-pods $DEPLOY_PARAMS --set base-configuration.serviceImage.env=$BRANCH --set base-configuration.serviceImage.sprint=latest $DEPLOYMENT_ENVIRONMENT-$COMPONENT_NAME dxc.captn/$COMPONENT_NAME --namespace=$DEPLOYMENT_ENVIRONMENT --wait
+  dependencies: []
+  tags:
+    - kube-helm
+
+artifactory_publish_dev:
+  <<: *artifactory_publish
+  variables:
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+
+artifactory_publish_env11:
+  <<: *artifactory_publish
+  variables:
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  only:
+  - dev
+  - production-r22
+  when: manual
+
+artifactory_publish_feature:
+  <<: *artifactory_publish
+  variables:
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - branches
+  when: manual
+
+artifactory_publish_env77:
+  <<: *artifactory_publish
+  variables:
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+
+artifactory_publish_env92:
+  <<: *artifactory_publish
+  variables:
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  only:
+  - staging
+  when: manual
+
+docker_publish_costing:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env13
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    COMPONENT_DOCKER_FILE: Dockerfile_Costing
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  dependencies:
+    - build_migrations
+    - build_costing
+
+docker_publish_costing_env11:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env11
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    COMPONENT_DOCKER_FILE: Dockerfile_Costing
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  only:
+  - dev
+  - production-r22
+  dependencies:
+    - build_migrations
+    - build_costing
+  when: manual
+
+docker_publish_costing_env77:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env77
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    COMPONENT_DOCKER_FILE: Dockerfile_Costing
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  dependencies:
+    - build_migrations
+    - build_costing
+
+docker_publish_costing_env92:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env92
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    COMPONENT_DOCKER_FILE: Dockerfile_Costing
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  only:
+  - staging
+  when: manual
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  dependencies:
+    - build_migrations
+    - build_costing
+
+docker_publish_costing_feature:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env14
+    BRANCH: feature
+    COMPONENT_NAME: costing
+    COMPONENT_DOCKER_FILE: Dockerfile_Costing
+    SPRINT_ID: $DEV_SPRINT_ID
+  when: manual
+  only:
+  - branches
+  environment:
+    name: feature
+  except:
+  - staging
+  dependencies:
+    - build_migrations
+    - build_costing
+
+docker_publish_calculation:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env13
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    COMPONENT_DOCKER_FILE: Dockerfile_Calculation
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  dependencies:
+    - build_calculation
+
+docker_publish_calculation_env11:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env11
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    COMPONENT_DOCKER_FILE: Dockerfile_Calculation
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  only:
+  - dev
+  - production-r22
+  dependencies:
+    - build_calculation
+  when: manual
+
+docker_publish_calculation_env77:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env77
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    COMPONENT_DOCKER_FILE: Dockerfile_Calculation
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  dependencies:
+    - build_calculation
+
+docker_publish_calculation_env92:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env92
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    COMPONENT_DOCKER_FILE: Dockerfile_Calculation
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  only:
+  - staging
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  dependencies:
+    - build_calculation
+  when: manual
+
+docker_publish_calculation_feature:
+  <<: *docker
+  stage: package
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env14
+    BRANCH: feature
+    COMPONENT_NAME: calculation-service
+    COMPONENT_DOCKER_FILE: Dockerfile_Calculation
+    SPRINT_ID: $DEV_SPRINT_ID
+  when: manual
+  only:
+  - branches
+  environment:
+    name: feature
+  except:
+  - staging
+  dependencies:
+    - build_calculation
+
+deploy_costing_env14:
+  <<: *deploy
+  stage: deploy_integration
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env14
+    BRANCH: feature
+    COMPONENT_NAME: costing
+    SPRINT_ID: $DEV_SPRINT_ID
+  when: manual
+  only:
+  - branches
+  environment:
+    name: feature
+  except:
+  - staging
+
+deploy_costing_env13:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env13
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  environment:
+    name: Development
+
+deploy_costing_env249:
+  <<: *deploy
+  stage: deploy_integration
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env249
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  environment:
+    name: integration-dev
+
+deploy_calculation_env14:
+  <<: *deploy
+  stage: deploy_integration
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env14
+    BRANCH: feature
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $DEV_SPRINT_ID
+  when: manual
+  only:
+  - branches
+  environment:
+    name: feature
+  except:
+  - staging
+
+deploy_calculation_env11:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env11
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  only:
+  - dev
+  - production-r22
+  when: manual
+  environment:
+    name: Development
+
+deploy_costing_env11:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env11
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  only:
+  - dev
+  - production-r22
+  when: manual
+  environment:
+    name: Development
+
+deploy_calculation_env13:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env13
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  environment:
+    name: Development
+
+deploy_calculation_env249:
+  <<: *deploy
+  stage: deploy_integration
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env249
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $DEV_SPRINT_ID
+  only:
+  - dev
+  environment:
+    name: integration-dev
+
+deploy_costing_env77:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env77
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Staging
+
+deploy_calculation_env77:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env77
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Staging
+
+deploy_costing_env92:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: env92
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Staging
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  when: manual
+
+deploy_calculation_env92:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: env92
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Staging
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  when: manual
+
+deploy_costing_performance:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOY_PARAMS: $MIGRATION_DB_SET_PARAM
+    DEPLOYMENT_ENVIRONMENT: performance
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: costing
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Performance
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  when: manual
+
+deploy_calculation_performance:
+  <<: *deploy
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: performance
+    BRANCH: $CI_BUILD_REF_NAME
+    COMPONENT_NAME: calculation-service
+    SPRINT_ID: $STAGING_SPRINT_ID
+  only:
+  - staging
+  environment:
+    name: Performance
+  except:
+  - triggers
+  - pipelines
+  - schedules
+  when: manual
+
+pre_deploy_env11:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env11
+    DEPLOYMENT_ENVIRONMENT: env11
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  <<: *pre_deploy
+  environment:
+    name: Env11
+    url: https://env11.captn.evaluate-it.cloud
+  only:
+  - dev
+  - production-r22
+  when: manual
+
+pre_deploy_env13:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env13
+    DEPLOYMENT_ENVIRONMENT: env13
+    SPRINT_ID: $DEV_SPRINT_ID
+  <<: *pre_deploy
+  environment:
+    name: Env13
+    url: https://env13.captn.evaluate-it.cloud
+  only:
+    - dev
+
+pre_deploy_env77:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env77
+    DEPLOYMENT_ENVIRONMENT: env77
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *pre_deploy
+  environment:
+    name: Staging
+    url: https://env77.evaluate-it.cloud
+  only:
+    - staging
+
+pre_deploy_env92:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env92
+    DEPLOYMENT_ENVIRONMENT: env92
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *pre_deploy
+  when: manual
+  environment:
+    name: Staging
+    url: https://env92.evaluate-it.cloud
+  only:
+    - staging
+
+pre_deploy_performance:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: performance
+    DEPLOYMENT_ENVIRONMENT: performance
+    CD_COMPONENT_NAME: costing
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *pre_deploy
+  environment:
+    name: performance
+    url: https://performance.captn.evaluate-it.cloud
+  when: manual
+  only:
+    - dev
+    - staging
+
+restore_db_env11:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env11
+    DEPLOYMENT_ENVIRONMENT: env11
+    SPRINT_ID: $PRODUCTION_R22_SPRINT_ID
+  <<: *restore_db
+  environment:
+    name: Env11
+    url: https://env11.captn.evaluate-it.cloud
+  when: manual
+  only:
+  - dev
+  - production-r22
+  when: manual
+
+restore_db_env13:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env13
+    DEPLOYMENT_ENVIRONMENT: env13
+    SPRINT_ID: $DEV_SPRINT_ID
+  <<: *restore_db
+  environment:
+    name: Env13
+    url: https://env13.captn.evaluate-it.cloud
+  when: manual
+  only:
+    - dev
+
+restore_db_env14:
+  stage: deploy_integration
+  variables:
+    ENV_CONSUL_DC: env14
+    DEPLOYMENT_ENVIRONMENT: env14
+    BRANCH_NAME: dev
+    SPRINT_ID: $DEV_SPRINT_ID
+  <<: *restore_db
+  when: manual
+  environment:
+    name: Env14
+    url: https://env14.captn.evaluate-it.cloud
+  except:
+    - staging
+    - production-r2
+    - production-r21
+    - production
+
+restore_db_env77:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env77
+    DEPLOYMENT_ENVIRONMENT: env77
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *restore_db
+  environment:
+    name: Staging
+    url: https://env77.evaluate-it.cloud
+  when: manual
+  only:
+    - staging
+
+restore_db_env92:
+  stage: deploy
+  variables:
+    ENV_CONSUL_DC: env92
+    DEPLOYMENT_ENVIRONMENT: env92
+    SPRINT_ID: $CUSTOMER_STAGING_SPRINT_ID
+  <<: *restore_db
+  environment:
+    name: Customer staging
+    url: https://env92.evaluate-it.cloud
+  when: manual
+  only:
+    - staging
+
+restore_db_performance:
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: performance
+    ENV_CONSUL_DC: performance
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *restore_db
+  environment:
+    name: performance
+    url: https://performance.captn.evaluate-it.cloud
+  when: manual
+  only:
+    - dev
+    - staging
+
+restore_db_env249:
+  stage: restore_db_integration
+  variables:
+    ENV_CONSUL_DC: env249
+    DEPLOYMENT_ENVIRONMENT: env249
+  <<: *restore_db
+  environment:
+    name: Env249
+    url: https://env249.captn.evaluate-it.cloud
+  dependencies: []
+  only:
+    - dev
+  tags:
+    - linux
+
+cleanup_db_performance:
+  stage: deploy
+  variables:
+    DEPLOYMENT_ENVIRONMENT: performance
+    ENV_CONSUL_DC: performance
+    SPRINT_ID: $STAGING_SPRINT_ID
+  <<: *cleanup_db
+  environment:
+    name: performance
+    url: https://performance.captn.evaluate-it.cloud
+  when: manual
+  only:
+    - dev
+    - staging
+
+sonar_report:
+  stage: analitics
+  script:
+    - New-Item -Path C:\ResharperCaches\$CI_PROJECT_NAME\$CI_BUILD_REF_SLUG -ItemType directory -Force
+    - SonarScanner.MSBuild.exe begin
+        /k:"$SOLUTION_NAME.$CI_BUILD_REF_SLUG"
+        /n:"Backend"
+        /v:$BUILD_VERSION
+        /d:sonar.cs.dotcover.reportsPaths=.\dotCover.html
+        /d:sonar.resharper.cs.reportPath=.\resharper.xml
+        /d:sonar.resharper.solutionFile=$CI_PROJECT_DIR\$ROOT_SOLUTION_FILE
+        /d:sonar.cs.vstest.reportsPaths=.\TestResults\*.trx
+        /d:sonar.verbose=true
+    - CI\buildProject.ps1 -Project $ROOT_SOLUTION_FILE -OutDir $SOLUTION_BUILD_OUT_DIR -SonarAnalysis $True
+    - inspectcode
+      /output=.\resharper.xml $CI_PROJECT_DIR\$ROOT_SOLUTION_FILE
+      /caches-home=C:\ResharperCaches\$CI_PROJECT_NAME\$CI_BUILD_REF_SLUG
+      /swea
+    - dotCover analyse
+        /ProcessFilters=-:sqlservr.exe
+        /ReportType=HTML
+        /Output=.\dotCover.html
+        /TargetExecutable="$((Get-Command vstest.console).Path)"
+        /TargetArguments="$(Get-ChildItem -Path .\ -Filter **.Tests.dll -Recurse | Where { $_.FullName -notlike "*\tests\obj\*" } | % { $_.FullName }) /logger:trx /TestAdapterPath:.\packages\xunit.runner.visualstudio.2.2.0\build\_common"
+    - SonarScanner.MSBuild.exe end
+  allow_failure: true
+  when: manual
+  tags:
+    - SonarQube
+  only:
+    - dev
+    - staging
+    - production-r2
+    - production-r21

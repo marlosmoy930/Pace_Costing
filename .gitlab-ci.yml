@@ -1,0 +1,83 @@
+image: docker:18.06.3-ce-git
+
+#stages:
+#  - build-push
+#  - deploy
+
+#variables:
+#  TERM: linux
+#  DOCKER_HOST: tcp://gitlab-dind-svc:2375
+#  DOCKER_DRIVER: overlay2
+
+#before_script:
+#  - apk add bash git ncurses openssh
+
+Costing-build-and-push: &Costing-build-and-push
+  stage: build-push
+  script:
+    - $CI_PROJECT_DIR/Costing/docker/build.sh
+    - $CI_PROJECT_DIR/Costing/docker/push.sh
+  only:
+    changes:
+      - "Costing/**/*"
+    refs:
+      - branches
+    variables:
+      - $CI_COMMIT_MESSAGE =~ /ci-build/
+  except:
+    refs:
+      - master
+#    variables:
+#      - $CI_COMMIT_BEFORE_SHA =~ /^0+$/
+  retry: 2
+  tags:
+    - k8s
+#  when: manual
+
+Costing-manual-build-and-push:
+  <<: *Costing-build-and-push
+  only:
+    - branches
+  except:
+    refs:
+      - master
+    variables:
+      - $BUILD_VERSION
+  when: manual
+#  allow_failure: false
+
+Costing-test-build:
+  stage: build
+  script:
+    - $CI_PROJECT_DIR/Costing/docker/build.sh
+  only:
+    refs:
+      - branches
+    variables:
+#      - $CI_COMMIT_REF_NAME =~ /^PACE_2.0.\d+$/
+      - $BUILD_VERSION =~ /^\d+$/
+  except:
+#    - merge_requests
+    - master
+  retry: 2
+  tags:
+    - k8s
+#  when: manual
+
+Costing-test-push:
+  stage: push
+  script:
+    - $CI_PROJECT_DIR/Costing/docker/push.sh
+  only:
+    refs:
+      - branches
+    variables:
+#      - $CI_COMMIT_REF_NAME =~ /^PACE_2.0.\d+$/
+      - $BUILD_VERSION =~ /^\d+$/
+  except:
+#    - merge_requests
+    - master
+  retry: 2
+  tags:
+    - k8s
+#  when: manual

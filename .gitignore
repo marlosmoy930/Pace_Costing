@@ -1,0 +1,45 @@
+# Temporary files
+*~*
+*.bak
+*.v3.ncrunch*
+
+# VS files
+*.dbmdl
+*.ncb
+*.suo
+*.vspscc
+*.jfm
+*.log
+
+# Settings
+*.dotCover
+*.DotSettings
+*.StyleCop
+*.user
+
+TestResults/
+
+# Folders
+bin/
+App_Data/
+obj/
+sql/
+debug/
+release/
+build/
+.nuget/
+.vs/
+packages/*
+CscGet.WebEntryPoint/Logs/
+TestResults/CscGet.TE.Tests.mdf
+TestResults/CscGet.TE.Tests_log.ldf
+CscGet.NotificationService/Logs/log.txt
+CscGet.WebEntryPoint/i18n/
+build/
+Deploy/
+!packages/repositories.config
+
+# JetBrains IDEA folder
+.idea/
+/Dxc.Captn.Costing.Host/PublishData/web
+/Dxc.Captn.Costing.Host/Dockerfile

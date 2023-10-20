@@ -1,0 +1,15 @@
+/**/bin/
+/**/obj/
+CI\
+.git\
+.vs\
+Integration\
+
+**/*.md
+
+.dockerignore
+
+Dockerfile
+Dockerfile_Costing
+Dockerfile_Reporting
+docker-compose.yml
