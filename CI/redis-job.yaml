@@ -1,0 +1,14 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clean-redis
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 100
+  template:
+    spec:
+      containers:
+      - name: pi
+        image: redis
+        command: ["redis-cli","-h", "redis-master", "FLUSHALL"]
+      restartPolicy: Never
