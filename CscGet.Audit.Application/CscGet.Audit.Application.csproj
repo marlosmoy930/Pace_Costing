@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../Targets/Costing.targets" />
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="JWT" Version="3.0.1" />
+    <PackageReference Include="MassTransit.Extensions.DependencyInjection" Version="5.2.0" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="5.2.0" />
+    <PackageReference Include="Dxc.Captn.Infrastructure.Settings.Jwt" Version="2.70.2.156071" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="2.2.0" />
+    <PackageReference Include="morelinq" Version="2.10.0" />
+    <PackageReference Include="MsgPack.Cli" Version="0.9.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.2" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="System.Collections.Immutable" Version="1.5.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CscGet.Audit.Domain\CscGet.Audit.Domain.csproj" />
+    <ProjectReference Include="..\CscGet.Audit.Persistence\CscGet.Audit.Persistence.csproj" />
+    <ProjectReference Include="..\CscGet.ConfigManager\CscGet.ConfigManager.csproj" />
+    <ProjectReference Include="..\CscGet.Costing.Domain\CscGet.Costing.Domain.csproj" />
+  </ItemGroup>
+</Project>
