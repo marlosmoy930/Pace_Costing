@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../Targets/Costing.targets" />
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Dxc.Captn.Costing.Contracts" Version="3.0.0.4" />
+    <PackageReference Include="Dxc.Captn.Infrastructure.Configuration" Version="2.70.2.156071" />
+    <PackageReference Include="Dxc.Pace.Operations.Contracts" Version="2.0.3.6" />
+    <PackageReference Include="GreenPipes" Version="2.1.3" />
+    <PackageReference Include="MassTransit" Version="5.2.0" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="5.2.0" />
+    <PackageReference Include="MsgPack.Cli" Version="0.9.1" />
+    <PackageReference Include="NewId" Version="3.0.1" />
+    <PackageReference Include="MsgPack.Cli" Version="0.9.1" />
+    <PackageReference Include="NewId" Version="3.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.2" />
+    <PackageReference Include="Newtonsoft.Json.Bson" Version="1.0.1" />
+    <PackageReference Include="RabbitMQ.Client" Version="5.1.0" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="Serilog.Exceptions" Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="3.1.1" />
+    <PackageReference Include="Serilog.Sinks.Debug" Version="1.0.0" />
+    <PackageReference Include="Serilog.Sinks.Fluentd" Version="0.2.2" />
+    <PackageReference Include="Serilog.Sinks.PeriodicBatching" Version="2.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CscGet.ConfigManager\CscGet.ConfigManager.csproj" />
+    <ProjectReference Include="..\CscGet.MessageContracts\CscGet.MessageContracts.csproj" />
+  </ItemGroup>
+</Project>
