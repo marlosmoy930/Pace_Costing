@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../Targets/Costing.targets" />
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AsyncFriendlyStackTrace" Version="1.6.0" />
+    <PackageReference Include="Dxc.Captn.Infrastructure.Settings.Sql" Version="2.70.2.156071" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.5.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CscGet.ConfigManager\CscGet.ConfigManager.csproj" />
+  </ItemGroup>
+</Project>
